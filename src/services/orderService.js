@@ -1,7 +1,7 @@
 const Order = require('../models/order');
 const Product = require('../models/product');
 const User = require('../models/user');
-const { ORDER_STATUS, ORDER_LIMITS, TAX_CONFIG } = require('../config/constants');
+const { ORDER_STATUS, ORDER_LIMITS, TAX_CONFIG, DISCOUNT_CONFIG } = require('../config/constants');
 
 /**
  * Calculate the subtotal for a list of order items.
@@ -32,13 +32,16 @@ const getTaxRateForState = (state) => {
 
 /**
  * Calculate the grand total including tax.
+ * Calculate the grand total, applying a discount to the subtotal.
  * @param {number} subtotal
+ * @param {number} discountAmount - flat amount to subtract (default: 0)
  * @param {number} taxRate - tax percentage (default: 0)
- * @returns {number} total amount due
+ * @returns {number} total amount due (never goes below 0)
  */
-const calculateTotal = (subtotal, taxRate = 0) => {
-  const taxAmount = calculateTax(subtotal, taxRate);
-  return parseFloat((subtotal + taxAmount).toFixed(2));
+const calculateTotal = (subtotal, discountAmount = 0,taxRate = 0) => {
+  const discounted = Math.max(0,subtotal - discountAmount);
+  const taxAmount = calculateTax(discounted, taxRate);
+  return taxAmount;
 };
 
 /**
@@ -76,9 +79,10 @@ const validateAndEnrichItems = async (items) => {
 
 /**
  * Create a new order, calculating applicable tax based on shipping state.
+ * Create a new order, applying an optional discount code.
  */
 const createOrder = async (userId, orderData) => {
-  const { items, shippingAddress, notes } = orderData;
+  const { items, shippingAddress, notes, discountCode } = orderData;
 
   const enrichedItems = await validateAndEnrichItems(items);
   const subtotal = calculateSubtotal(enrichedItems);
@@ -90,6 +94,12 @@ const createOrder = async (userId, orderData) => {
   const taxRate = getTaxRateForState(shippingAddress?.state);
   const taxAmount = calculateTax(subtotal, taxRate);
   const totalAmount = calculateTotal(subtotal, taxRate);
+  if (subtotal < ORDER_LIMITS.MIN_ORDER_AMOUNT) { const err = new Error(`Minimum order is $${ORDER_LIMITS.MIN_ORDER_AMOUNT}.`); err.statusCode = 400; throw err; }
+  if (subtotal > ORDER_LIMITS.MAX_ORDER_AMOUNT) { const err = new Error(`Maximum order is $${ORDER_LIMITS.MAX_ORDER_AMOUNT}.`); err.statusCode = 400; throw err; }
+
+  // Apply discount code if provided
+  const { discountAmount, discountDescription, valid } = applyDiscount(subtotal, discountCode);
+  const totalAmount = calculateTotal(subtotal, discountAmount);
 
   const order = new Order({
     user: userId,
@@ -98,6 +108,9 @@ const createOrder = async (userId, orderData) => {
     subtotal,
     taxRate,
     taxAmount,
+    discountCode: valid ? discountCode.toUpperCase() : undefined,
+    discountAmount,
+    discountDescription,
     totalAmount,
     notes,
     statusHistory: [{ status: ORDER_STATUS.PENDING }],
@@ -155,6 +168,9 @@ const cancelOrder = async (orderId, userId) => {
 
 module.exports = {
   calculateSubtotal, calculateTotal, calculateTax, getTaxRateForState,
+  validateAndEnrichItems, createOrder, getOrdersByUser,
+  getOrderById, updateOrderStatus, cancelOrder,
+  calculateSubtotal, calculateTotal, applyDiscount,
   validateAndEnrichItems, createOrder, getOrdersByUser,
   getOrderById, updateOrderStatus, cancelOrder,
 };
