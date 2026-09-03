@@ -34,6 +34,17 @@ const errorHandler = (err, req, res, next) => {
     message = 'Search is temporarily unavailable. Please try again later.';
   }
 
+  // Rate limit exceeded (from express-rate-limit)
+  if (statusCode === 429) {
+    message = err.message || 'Too many requests. Please slow down and try again later.';
+  }
+
+  // Cache errors (node-cache)
+  if (err.message && err.message.includes('node-cache')) {
+    statusCode = 503;
+    message = 'Cache service temporarily unavailable. Request served from database.';
+  }
+
   if (statusCode >= 500 && process.env.NODE_ENV !== 'test') {
     console.error(`[ERROR] ${err.stack}`);
   }
