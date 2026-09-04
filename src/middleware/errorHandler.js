@@ -28,6 +28,12 @@ const errorHandler = (err, req, res, next) => {
   if (err.name === 'JsonWebTokenError') { statusCode = 401; message = 'Invalid authentication token.'; }
   if (err.name === 'TokenExpiredError') { statusCode = 401; message = 'Authentication token has expired. Please log in again.'; }
 
+  // MongoDB text search error (e.g., text index not yet built)
+  if (err.codeName === 'IndexNotFound' || (err.message && err.message.includes('text index'))) {
+    statusCode = 503;
+    message = 'Search is temporarily unavailable. Please try again later.';
+  }
+
   // Rate limit exceeded (from express-rate-limit)
   if (statusCode === 429) {
     message = err.message || 'Too many requests. Please slow down and try again later.';
